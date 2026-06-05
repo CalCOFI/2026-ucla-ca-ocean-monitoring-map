@@ -28,30 +28,22 @@ library(glue)
 # USER SETTINGS — edit these
 ############################
 
-# Temp directory (R uses this for large file operations)
-dir_tmp  <- here("tmp")
-dir_data <- here("data")
-dir_out  <- here("outputs")
-dir.create(dir_tmp, showWarnings = F)
+# shared path config: dir_data, dir_out, dir_tmp, dir_web,
+# attribute_table_path, ca_boundary_path, gebco_raster_path
+source(here::here("R/paths.R"))
+
+# point R's large-file temp operations at the repo tmp dir
 Sys.setenv(VROOM_TEMP_PATH = dir_tmp)
 Sys.setenv(TMPDIR          = dir_tmp)
 Sys.setenv(TMP             = dir_tmp)
 Sys.setenv(TEMP            = dir_tmp)
-# dir.create("C:/Users/bhuan/Documents/R_temp", showWarnings = FALSE, recursive = TRUE)
 
-# Folder containing this program's CSV files.
+# Folder containing this program's CSV files (one category folder under dir_data).
+# Select with the PROGRAM env var, e.g. PROGRAM=eDNA Rscript R/build_program_layer.R
 # Chunk suffix (e.g. _1, _2) is stripped automatically for output naming.
-# program_folder <- "C:/Users/bhuan/Downloads/Monitoring Data/CalCOFI_5"
-program_folder <- glue("{dir_data}/CalCOFI_5")
+program_folder <- glue("{dir_data}/{Sys.getenv('PROGRAM', unset = 'eDNA')}")
 
-# output_root   <- "C:/Users/bhuan/Downloads/Monitoring_Outputs"
-# ca_boundary_path    <- "C:/Users/bhuan/Downloads/Monitoring Data/ca_state/CA_State.shp"
-# attribute_table_path <- "C:/Users/bhuan/Downloads/Monitoring Data/Attribute_Table.csv"
-# gebco_raster_path <- "C:/Users/bhuan/Downloads/Monitoring_Outputs/gebco_2025_n48.0_s30.0_w-130.0_e-110.0_geotiff.tif"
-output_root          <- dir_out
-ca_boundary_path     <- glue("{dir_out}/ca_state/CA_State.shp")
-attribute_table_path <- glue("{dir_out}/Attribute_Table.csv")
-gebco_raster_path    <- glue("{dir_out}/gebco_2025_n48.0_s30.0_w-130.0_e-110.0_geotiff.tif")
+output_root <- dir_out
 
 start_year         <- 2000    # Exclude records before this year
 active_cutoff_year <- 2015    # Programs with no data after this year are flagged inactive
@@ -78,8 +70,25 @@ dir.create(output_folder, showWarnings = FALSE, recursive = TRUE)
 # platform) and per-parameter cross-references.
 ############################################
 
+# normalize Attribute_Table column names to those used downstream.
+# the shared table uses the canonical "ACRYNOM" spelling and split
+# frequency/platform columns; map them to the names this script expects.
+normalize_attr_cols <- function(df) {
+  rename_map <- c(
+    acronym                         = "acrynom",
+    frequency                       = "sampling_frequency",
+    sampling_platform_ship_buoy_etc = "sampling_platform")
+  for (new in names(rename_map)) {
+    old <- rename_map[[new]]
+    if (old %in% names(df) && !(new %in% names(df)))
+      names(df)[names(df) == old] <- new
+  }
+  df
+}
+
 attr_table_raw <- read_csv(attribute_table_path, show_col_types = FALSE) %>%
   clean_names() %>%
+  normalize_attr_cols() %>%
   filter(!is.na(acronym), str_trim(acronym) != "",
          !is.na(standard_parameter), str_trim(standard_parameter) != "") %>%
   mutate(across(everything(), str_trim))
@@ -94,6 +103,7 @@ attr_param_lookup <- attr_table_raw %>%
 # Program-level metadata (full name, frequency, platform)
 attr_table_programs <- read_csv(attribute_table_path, show_col_types = FALSE) %>%
   clean_names() %>%
+  normalize_attr_cols() %>%
   filter(!is.na(acronym), str_trim(acronym) != "") %>%
   mutate(across(everything(), str_trim))
 
@@ -108,17 +118,34 @@ program_metadata <- attr_table_programs %>%
   rename(program_name = acronym) %>%
   mutate(across(everything(), ~ if_else(is.na(.x) | str_trim(.x) == "", "Unknown", str_trim(.x))))
 
+# friendly display titles for the parameter-theme folders, which are not
+# monitoring programs in Attribute_Table.csv (so no metadata match)
+theme_titles <- c(
+  "Carbonate Chemistry"                = "Carbonate Chemistry",
+  "eDNA"                               = "Environmental DNA (eDNA)",
+  "Fish Eggs and Larvae"               = "Fish Eggs and Larvae (Ichthyoplankton)",
+  "Marine Mammals"                     = "Marine Mammals",
+  "Phytoplankton and Bacterioplankton" = "Phytoplankton and Bacterioplankton",
+  "Primary Productivity"               = "Primary Productivity",
+  "Seabirds"                           = "Seabirds",
+  "Standard Parameter"                 = "Standard Oceanographic Parameters",
+  "Zooplankton"                        = "Zooplankton")
+
 program_meta <- program_metadata %>% filter(program_name == !!program_name)
 
+display_name <- chunk_name
 if (nrow(program_meta) == 0) {
-  warning("'", program_name, "' not found in Attribute_Table.csv — ",
-          "add a row to set full_name, frequency, and platform.")
-  display_name       <- chunk_name
-  program_full_name  <- "Unknown"
+  # not a program acronym — use a friendly theme title if known
+  if (program_name %in% names(theme_titles)) {
+    program_full_name <- unname(theme_titles[program_name])
+  } else {
+    warning("'", program_name, "' not found in Attribute_Table.csv or theme_titles — ",
+            "add a row or a theme title to set full_name, frequency, and platform.")
+    program_full_name <- chunk_name
+  }
   sampling_frequency <- "Unknown"
   program_platform   <- "Unknown"
 } else {
-  display_name       <- chunk_name
   program_full_name  <- program_meta$full_name
   sampling_frequency <- program_meta$frequency
   program_platform   <- program_meta$platform
@@ -1610,7 +1637,7 @@ hex_map_sf_export <- hex_map_sf %>%
     `Frequency`, `Platform`, `Geometry Types`,
     `Depth Range (m)`, `Sample Locations`,
     `Centroid Latitude`, `Centroid Longitude`,
-    `Gebco Mean Depth`= gebco_mean_depth,
+    `Gebco Mean Depth`,
     starts_with("param_"),
     geometry
   )

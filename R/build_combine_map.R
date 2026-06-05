@@ -17,7 +17,10 @@
 library(tidyverse)
 library(sf)
 
-output_root   <- "C:/Users/bhuan/Downloads/Monitoring_Outputs"
+# shared path config: dir_data, dir_out, etc.
+source(here::here("R/paths.R"))
+
+output_root   <- dir_out
 combined_name <- "Master_Inventory"
 
 # Names of discharger output folders — excluded from hex combine

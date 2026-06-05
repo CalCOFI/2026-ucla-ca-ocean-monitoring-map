@@ -2,6 +2,8 @@
 
 An interactive Leaflet map of California ocean and coastal monitoring programs. Displays monitoring coverage as hex grid cells, survey transects, and point-based discharger/WWTP monitoring stations.
 
+![Screenshot of the California Ocean & Coastal Monitoring Inventory map, showing hex-grid monitoring coverage along the California coast with a per-program legend.](images/screenshot.png)
+
 ---
 
 ## Repository Structure
@@ -9,35 +11,40 @@ An interactive Leaflet map of California ocean and coastal monitoring programs. 
 ```
 ca-ocean-monitoring-map/
 ├── R/
-│   ├── build_program_layer.R      # Process one monitoring program → hex GeoJSON
-│   ├── build_discharger_layer.R   # Process discharger CSVs → point GeoJSON
-│   └── build_combine_map.R        # Combine all layers → Master_Inventory.geojson
+│   ├── paths.R                    # shared path config (sourced by all scripts)
+│   ├── build_program_layer.R      # process one program/theme folder → hex GeoJSON
+│   ├── build_discharger_layer.R   # process discharger CSVs → point GeoJSON
+│   └── build_combine_map.R        # combine all layers → Master_Inventory.geojson
 ├── web/
-│   └── index.html                 # Interactive map (copy to Monitoring_Outputs/)
+│   └── index.html                 # interactive map (Leaflet)
+├── outputs/                       # built layers (git-ignored; synced to GCS)
 ├── README.md
 └── .gitignore
 ```
 
 ---
 
-## Output Folder Structure
+## Paths & data folder
 
-Running the R scripts populates a `Monitoring_Outputs/` folder (not committed to GitHub):
+All scripts source `R/paths.R`, the single source of truth for file locations:
 
-```
-Monitoring_Outputs/
-├── index.html                    ← Copy from web/
-├── Master_Inventory.geojson      ← Combined monitoring hex grid
-├── transects.csv                 ← Combined survey transects
-├── gebco_2025_*.tif              ← GEBCO bathymetry raster (download separately)
-├── Dischargers/
-│   └── Dischargers.geojson
-├── CalCOFI/
-│   └── CalCOFI.geojson
-├── NOAA THL/
-│   └── NOAA THL.geojson
-└── SCCWRP/
-    └── SCCWRP.geojson
+- **`dir_data`** — raw input data root. Defaults to the shared Google Drive folder
+  `~/My Drive/projects/calcofi/data-public/_projects/ca-ocean-monitoring-map/`.
+  Override per machine with the `CALCOFI_DATA` environment variable.
+- **`dir_out`** — `outputs/` in the repo (via `here()`); built GeoJSON/CSV layers,
+  synced to Google Cloud Storage.
+
+The data folder holds the input CSVs (organized in per-theme/program subfolders)
+plus three reference files used by the program builder:
+
+- `Attribute_Table.csv` — program/parameter metadata lookup
+- `ca_state/CA_State.shp` (+ sidecars) — CA boundary for the coastal clip
+- `gebco_2025_*.tif` — GEBCO 2025 seafloor-depth raster
+
+Override the data root for a different machine:
+
+```bash
+export CALCOFI_DATA="/path/to/data/ca-ocean-monitoring-map"
 ```
 
 ---
@@ -46,70 +53,126 @@ Monitoring_Outputs/
 
 **R packages:**
 ```r
-install.packages(c("readr", "dplyr", "tidyr", "stringr", "purrr",
-                   "sf", "terra", "janitor", "tidyverse"))
+install.packages(c("tidyverse", "sf", "terra", "janitor", "here", "glue"))
 ```
-
-**Input data not included in this repo:**
-- Monitoring program CSVs in per-program folders
-- Discharger monitoring CSVs
-- CA boundary shapefile (`CA_State.shp`)
-- Attribute lookup table (`Attribute_Table.csv`)
-- GEBCO 2025 bathymetry GeoTIFF (download from [GEBCO](https://www.gebco.net/data_and_products/gridded_bathymetry_data/))
 
 ---
 
 ## How to Run
 
-### Step 1 — Build each monitoring program layer
+### Step 1 — Build each program/theme layer
 
-Edit USER SETTINGS at the top of `R/build_program_layer.R` and run once per program folder (or chunk). Outputs a GeoJSON and `transects.csv` per program.
+`build_program_layer.R` processes one input folder under `dir_data` into a hex
+GeoJSON. Select the folder with the `PROGRAM` environment variable:
 
-### Step 2 — Build discharger layer
+```bash
+PROGRAM="eDNA" Rscript R/build_program_layer.R
+```
 
-Edit USER SETTINGS in `R/build_discharger_layer.R` and run. Outputs `Dischargers/Dischargers.geojson`.
+Run once per folder. Output lands in `outputs/<program>/<chunk>/<program>.geojson`
+plus a `transects.csv` and diagnostic CSVs. Folder names that aren't programs in
+`Attribute_Table.csv` (the parameter themes) get a friendly title from the
+`theme_titles` map near the top of the script.
+
+Build all folders:
+```bash
+for d in "$CALCOFI_DATA"/*/; do
+  name=$(basename "$d")
+  case "$name" in ca_state) continue;; esac
+  PROGRAM="$name" Rscript R/build_program_layer.R
+done
+```
+
+### Step 2 — Build discharger layer (optional)
+
+```bash
+Rscript R/build_discharger_layer.R
+```
+Reads `dir_data/Dischargers/` → `outputs/Dischargers/Dischargers.geojson`.
+Skips cleanly if no `Dischargers/` folder exists.
 
 ### Step 3 — Combine everything
 
-Edit paths at the top of `R/build_combine_map.R` and run. Outputs `Master_Inventory.geojson` and `transects.csv`.
-
-### Step 4 — Serve the map
-
-Copy `web/index.html` into `Monitoring_Outputs/` then serve with a local web server:
-
-**VS Code:** Right-click `index.html` → *Open with Live Server*
-
-**Python:**
 ```bash
-cd path/to/Monitoring_Outputs
-python -m http.server 8000
-# Open http://localhost:8000
+Rscript R/build_combine_map.R
 ```
+Merges all program GeoJSONs into `outputs/Master_Inventory.geojson` and
+`outputs/transects.csv` (discharger point layers excluded).
+
+### Step 4 — Serve the map locally
+
+The web app fetches three artifacts relative to `DATA_BASE` (a constant near the
+top of the `<script>` in `web/index.html`): `Master_Inventory.geojson`,
+`transects.csv`, and each `DISCHARGER_SOURCES` path. With `DATA_BASE = ''` they
+load from the same folder as `index.html`.
+
+```bash
+# copy built artifacts next to index.html, then serve
+cp outputs/Master_Inventory.geojson outputs/transects.csv web/ 2>/dev/null
+cp -r outputs/Dischargers web/ 2>/dev/null
+cd web && python3 -m http.server 8000
+# open http://localhost:8000
+```
+
+---
+
+## Hosting
+
+### Data on Google Cloud Storage (recommended)
+
+Host the built layers in a public GCS bucket and point the web app at it.
+
+```bash
+# one-time bucket setup (public-read static data)
+gsutil mb -l us-west1 gs://calcofi-monitoring-map
+gsutil iam ch allUsers:objectViewer gs://calcofi-monitoring-map
+
+# CORS so the browser can fetch cross-origin
+printf '[{"origin":["*"],"method":["GET"],"responseHeader":["Content-Type"],"maxAgeSeconds":3600}]' > cors.json
+gsutil cors set cors.json gs://calcofi-monitoring-map
+
+# publish built layers (re-run after each rebuild)
+gsutil -m rsync -r outputs/ gs://calcofi-monitoring-map/
+```
+
+Then set in `web/index.html`:
+```js
+const DATA_BASE = 'https://storage.googleapis.com/calcofi-monitoring-map/';
+```
+
+### Static site — pick one
+
+- **GitHub Pages:** enable Pages on the repo serving from `/web` (or move
+  `index.html` to `/docs`). Only `index.html` is committed; data comes from GCS
+  via `DATA_BASE`.
+- **Google VM:** copy `web/` to the VM and serve via nginx/Apache (or
+  `python3 -m http.server` behind the existing reverse proxy). Data via `DATA_BASE`.
 
 ---
 
 ## Map Features
 
-- **Hex grid** — monitoring coverage by program, colored and patterned per program
+- **Hex grid** — monitoring coverage by program/theme, colored and patterned per layer
 - **Filters** — filter by program, parameter, or EOV group
 - **Transects** — survey cruise tracks loaded from `transects.csv`
 - **Dischargers** — WWTP/ocean discharger stations, colored per facility
-- **Bathymetry** — optional GEBCO 2025 seafloor depth layer
+- **Bathymetry** — GEBCO 2025 seafloor depth (pre-computed per hex)
 - **Popups** — parameters, depth range, GEBCO seafloor depth, coordinates
 
 ---
 
-## Adding a New Monitoring Program
+## Adding a New Layer
 
-1. Place CSVs in a subfolder of `Monitoring_Outputs/`
-2. Run `build_program_layer.R` pointing to that folder
-3. Run `build_combine_map.R` to regenerate `Master_Inventory.geojson`
+1. Place CSVs in a new subfolder of the data root (`dir_data`).
+2. `PROGRAM="New Folder" Rscript R/build_program_layer.R`
+3. (Optional) add a `theme_titles` entry in `build_program_layer.R` for a nice label.
+4. `Rscript R/build_combine_map.R` to regenerate `Master_Inventory.geojson`.
 
-## Adding a New Discharger Layer
+### Adding a New Discharger Layer
 
-1. Run `build_discharger_layer.R` with updated folder/name settings
-2. Add folder name to `discharger_folder_names` in `build_combine_map.R`
-3. Add entry to `DISCHARGER_SOURCES` in `web/index.html`:
+1. Run `build_discharger_layer.R` (reads `dir_data/Dischargers/`).
+2. Add the folder name to `discharger_folder_names` in `build_combine_map.R`.
+3. Add an entry to `DISCHARGER_SOURCES` in `web/index.html`:
 ```javascript
 const DISCHARGER_SOURCES = [
   { path: 'Dischargers/Dischargers.geojson', label: 'Dischargers' },
