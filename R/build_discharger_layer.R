@@ -21,10 +21,19 @@ library(janitor)
 # USER SETTINGS — edit these
 ############################################
 
-discharger_folder     <- "C:/Users/bhuan/Downloads/Monitoring Data/Dischargers"
-discharger_layer_name <- "Dischargers"
+# shared path config: dir_data, dir_out, etc.
+source(here::here("R/paths.R"))
 
-output_root   <- "C:/Users/bhuan/Downloads/Monitoring_Outputs"
+discharger_layer_name <- "Dischargers"
+discharger_folder     <- glue("{dir_data}/{discharger_layer_name}")
+
+# skip cleanly if no discharger inputs have been added yet
+if (!dir.exists(discharger_folder)) {
+  message("No discharger folder at ", discharger_folder, " — skipping discharger layer.")
+  quit(save = "no", status = 0)
+}
+
+output_root   <- dir_out
 output_folder <- file.path(output_root, discharger_layer_name)
 dir.create(output_folder, showWarnings = FALSE, recursive = TRUE)
 

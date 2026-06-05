@@ -199,9 +199,14 @@
 <script>
 // ════════════════════════════════════════════════════════════
 // CONFIG
-// Add entries here for each discharger GeoJSON to load.
-// path is relative to this HTML file (i.e. inside Monitoring_Outputs/).
+// DATA_BASE prefixes all data fetches.
+//   ''  → same folder as this HTML file (local testing).
+//   GCS → 'https://storage.googleapis.com/<bucket>/'
+// Add entries to DISCHARGER_SOURCES for each discharger GeoJSON to load;
+// each path is resolved relative to DATA_BASE.
 // ════════════════════════════════════════════════════════════
+const DATA_BASE = '';
+
 const DISCHARGER_SOURCES = [
   { path: 'Dischargers/Dischargers.geojson', label: 'Dischargers' }
 ];
@@ -373,7 +378,7 @@ function loadDischargers() {
   dischargerCount = 0;
 
   const fetches = DISCHARGER_SOURCES.map(src =>
-    fetch(src.path)
+    fetch(DATA_BASE + src.path)
       .then(r => {
         if (!r.ok) throw new Error(src.path + ' not found (HTTP ' + r.status + ')');
         return r.json();
@@ -474,10 +479,10 @@ function buildTransectPopup(row) {
   const survey=SURVEY_LABELS[svyCode]||(svyCode||'Unknown');
   const date=row['Date']||row['date']||'';
   const depth=formatDepth(row['Depth (m)']||row['depth_m']||row['depth']);
-  const latS=getCoord(row,'Latitude Start (º)','latitude_start');
-  const lonS=getCoord(row,'Longitude Start (º)','longitude_start');
-  const latE=getCoord(row,'Latitude Stop (º)','latitude_stop');
-  const lonE=getCoord(row,'Longitude Stop (º)','longitude_stop');
+  const latS=getCoord(row,'Latitude Start (º)','Latitude Start','latitude_start');
+  const lonS=getCoord(row,'Longitude Start (º)','Longitude Start','longitude_start');
+  const latE=getCoord(row,'Latitude Stop (º)','Latitude Stop','latitude_stop');
+  const lonE=getCoord(row,'Longitude Stop (º)','Longitude Stop','longitude_stop');
   const coordStr=fmtCoord(latS,lonS);
   const stopStr=fmtCoord(latE,lonE);
   const fullCoord=coordStr?(coordStr+(stopStr&&stopStr!==coordStr?' → '+stopStr:'')):null;
@@ -503,7 +508,7 @@ function buildTransectPopup(row) {
 function loadTransects() {
   const statusEl=document.getElementById('transect-status');
   statusEl.textContent='Loading…';
-  fetch('transects.csv')
+  fetch(DATA_BASE + 'transects.csv')
     .then(r=>{if(!r.ok)throw new Error('transects.csv not found');return r.text();})
     .then(text=>{
       const rows=parseCSV(text);
@@ -511,12 +516,12 @@ function loadTransects() {
       transectLayer.clearLayers();
       let drawn=0,clipped=0;
       rows.forEach(row=>{
-        const latS=getCoord(row,'Latitude Start (º)','latitude_start');
-        const lonS=getCoord(row,'Longitude Start (º)','longitude_start');
-        const latM=getCoord(row,'Latitude Mid (º)','latitude_mid');
-        const lonM=getCoord(row,'Longitude Mid (º)','longitude_mid');
-        const latE=getCoord(row,'Latitude Stop (º)','latitude_stop');
-        const lonE=getCoord(row,'Longitude Stop (º)','longitude_stop');
+        const latS=getCoord(row,'Latitude Start (º)','Latitude Start','latitude_start');
+        const lonS=getCoord(row,'Longitude Start (º)','Longitude Start','longitude_start');
+        const latM=getCoord(row,'Latitude Mid (º)','Latitude Mid','latitude_mid');
+        const lonM=getCoord(row,'Longitude Mid (º)','Longitude Mid','longitude_mid');
+        const latE=getCoord(row,'Latitude Stop (º)','Latitude Stop','latitude_stop');
+        const lonE=getCoord(row,'Longitude Stop (º)','Longitude Stop','longitude_stop');
         if(isNaN(latS)||isNaN(lonS)||isNaN(latE)||isNaN(lonE)) return;
         if(!isValidTransect(latS,lonS,latE,lonE)){clipped++;return;}
         const coords=[[latS,lonS]];
@@ -556,7 +561,7 @@ function toggleTransects() {
 // Loads Master_Inventory.geojson, draws patterned
 // hex polygons, populates filter dropdowns.
 // ════════════════════════════════════════════════════════════
-fetch('Master_Inventory.geojson')
+fetch(DATA_BASE + 'Master_Inventory.geojson')
   .then(r=>r.json())
   .then(data=>{
     allFeatures=data.features;
