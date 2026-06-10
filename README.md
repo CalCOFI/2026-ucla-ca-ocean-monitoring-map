@@ -118,7 +118,20 @@ cd web && python3 -m http.server 8000
 
 ## Hosting
 
-### Data on Google Cloud Storage (recommended)
+### GitHub Pages (current deployment)
+
+The map is live at <https://calcofi.io/2026-ucla-ca-ocean-monitoring-map/>.
+`.github/workflows/pages.yml` publishes the `web/` folder on every push to
+main. The built artifacts (`Master_Inventory.geojson`, `transects.csv`) are
+committed alongside `index.html` and served same-origin, so `DATA_BASE = ''`
+and no bucket or CORS setup is needed. After rebuilding layers:
+
+```bash
+cp outputs/Master_Inventory.geojson outputs/transects.csv web/
+git add web/ && git commit -m "data: rebuild layers" && git push
+```
+
+### Data on Google Cloud Storage (alternative)
 
 Host the built layers in a public GCS bucket and point the web app at it.
 

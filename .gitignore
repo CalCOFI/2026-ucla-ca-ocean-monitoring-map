@@ -6,8 +6,3 @@
 .claude
 tmp
 outputs
-
-# locally-staged build artifacts for web testing (data is hosted on GCS)
-web/Master_Inventory.geojson
-web/transects.csv
-web/Dischargers/
